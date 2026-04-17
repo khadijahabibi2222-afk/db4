@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>موسسه خیریه رفاه یتیم</title>
+    <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:wght@400;600;700&family=DM+Sans:wght@300;400;500;600&family=Vazirmatn:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js"></script>
+    
+    <style>
+        :root{
+            --bg:#0f1117;--surface:#1a1d27;--surface2:#22263a;--border:#2e3248;
+            --gold:#c9a84c;--gold2:#e8c97a;--teal:#3ecfcf;--red:#e05a6b;
+            --green:#4caf8a;--blue:#5b8cf5;--text:#e8eaf0;--text2:#9ba3bf;
+            --radius:12px;--font:'DM Sans',sans-serif;--font-fa:'Vazirmatn',sans-serif;
+        }
+        *{box-sizing:border-box;margin:0;padding:0}
+        body{background:var(--bg);color:var(--text);font-family:var(--font);min-height:100vh}
+        body.rtl{font-family:var(--font-fa);direction:rtl}
+        
+        /* Login Page */
+        #loginPage{position:fixed;inset:0;z-index:9000;background:var(--bg);display:flex}
+        .login-right{flex:1;display:flex;align-items:center;justify-content:center;padding:2rem}
+        .login-card{width:100%;max-width:380px}
+        .login-logo{text-align:center;margin-bottom:1.5rem}
+        .login-logo .icon{width:60px;height:60px;background:linear-gradient(135deg,var(--gold),var(--gold2));border-radius:16px;display:flex;align-items:center;justify-content:center;font-size:28px;margin:0 auto 1rem;box-shadow:0 10px 30px rgba(201,168,76,.4)}
+        input{width:100%;padding:14px;margin:10px 0;background:var(--surface);border:1px solid var(--border);border-radius:8px;color:var(--text);font-size:1rem}
+        button{width:100%;padding:14px;background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a1200;border:none;border-radius:8px;font-weight:700;font-size:1.1rem;cursor:pointer;margin-top:10px}
+        
+        /* Main App */
+        #app{display:none;min-height:100vh}
+        .sidebar{width:260px;background:var(--surface);position:fixed;height:100vh;overflow-y:auto}
+        .main{margin-left:260px;padding:1.5rem}
+        
+        /* You can add more of your original styles here if needed */
+        .section{display:none}
+        .section.active{display:block}
+        .btn-primary{background:linear-gradient(135deg,var(--gold),var(--gold2));color:#1a1200}
+    </style>
+</head>
+<body>
+
+<!-- ====================== LOGIN PAGE ====================== -->
+<div id="loginPage">
+    <div class="login-right">
+        <div class="login-card">
+            <div class="login-logo">
+                <div class="icon">🕌</div>
+                <h1>موسسه خیریه رفاه یتیم</h1>
+                <p>سیستم مدیریت یکپارچه</p>
+            </div>
+            
+            <input type="text" id="username" placeholder="نام کاربری" value="admin">
+            <input type="password" id="password" placeholder="رمز عبور" value="1234">
+            <button onclick="handleLogin()">ورود به سیستم</button>
+            
+            <p style="text-align:center;margin-top:15px;color:var(--text2);font-size:0.9rem">
+                admin / 1234
+            </p>
+        </div>
+    </div>
+</div>
+
+<!-- ====================== MAIN APP ====================== -->
+<div id="app">
+    <div class="sidebar">
+        <h2 style="padding:1.5rem;color:var(--gold);text-align:center">رفاه یتیم</h2>
+        <div onclick="showSection('dashboard')" style="padding:1rem 1.5rem;cursor:pointer">داشبورد</div>
+        <div onclick="showSection('orphans')" style="padding:1rem 1.5rem;cursor:pointer">یتیمان</div>
+        <div onclick="showSection('scores')" style="padding:1rem 1.5rem;cursor:pointer">نمرات</div>
+        <div onclick="showSection('finance')" style="padding:1rem 1.5rem;cursor:pointer">مالی</div>
+        <div onclick="showSection('books')" style="padding:1rem 1.5rem;cursor:pointer">کتابخانه</div>
+    </div>
+
+    <div class="main">
+        <!-- Dashboard Section -->
+        <div id="dashboard" class="section active">
+            <h1>داشبورد</h1>
+            <p>خوش آمدید به سیستم مدیریت موسسه خیریه رفاه یتیم</p>
+        </div>
+
+        <!-- Add more sections as needed -->
+        <div id="orphans" class="section">
+            <h2>لیست یتیمان</h2>
+            <button onclick="loadOrphans()">بارگذاری یتیمان</button>
+            <div id="orphans-list"></div>
+        </div>
+
+        <!-- Finance Section -->
+        <div id="finance" class="section">
+            <h2>تراکنش‌های مالی</h2>
+            <button onclick="openFinanceModal()">ثبت تراکنش جدید</button>
+        </div>
+    </div>
+</div>
+
+<script>
+    const API_BASE = '';   // Leave empty for Render (same domain)
+
+    async function apiRequest(url, method = 'GET', body = null) {
+        const options = {
+            method: method,
+            headers: { 'Content-Type': 'application/json' }
+        };
+        if (body) options.body = JSON.stringify(body);
+
+        try {
+            const res = await fetch(API_BASE + url, options);
+            return await res.json();
+        } catch (err) {
+            console.error(err);
+            return { success: false, message: 'خطا در ارتباط با سرور' };
+        }
+    }
+
+    // ==================== LOGIN ====================
+    async function handleLogin() {
+        const username = document.getElementById('username').value.trim();
+        const password = document.getElementById('password').value.trim();
+
+        const result = await apiRequest('/api/login', 'POST', { username, password });
+
+        if (result.success) {
+            document.getElementById('loginPage').style.display = 'none';
+            document.getElementById('app').style.display = 'block';
+            loadOrphans();   // Load initial data
+        } else {
+            alert('❌ نام کاربری یا رمز عبور اشتباه است\n\nadmin / 1234');
+        }
+    }
+
+    // ==================== ORPHANS ====================
+    async function loadOrphans() {
+        const data = await apiRequest('/api/orphans');
+        const container = document.getElementById('orphans-list');
+        if (!data || data.length === 0) {
+            container.innerHTML = '<p>هیچ یتیمی یافت نشد</p>';
+            return;
+        }
+        let html = '<table border="1" style="width:100%;border-collapse:collapse"><tr><th>نام</th><th>نام پدر</th><th>سن</th><th>صنف</th></tr>';
+        data.forEach(o => {
+            html += `<tr><td>${o.name}</td><td>${o.fatherName||'-'}</td><td>${o.age||'-'}</td><td>${o.grade||'-'}</td></tr>`;
+        });
+        html += '</table>';
+        container.innerHTML = html;
+    }
+
+    // ==================== SECTION SWITCH ====================
+    function showSection(sectionId) {
+        document.querySelectorAll('.section').forEach(s => s.classList.remove('active'));
+        document.getElementById(sectionId).classList.add('active');
+    }
+
+    // ==================== FINANCE MODAL (Example) ====================
+    function openFinanceModal() {
+        alert('Modal ثبت تراکنش مالی باز شد (بعداً کامل می‌شود)');
+        // You can expand this later
+    }
+
+    // Allow Enter key on login
+    document.addEventListener('keypress', (e) => {
+        if (e.key === 'Enter') handleLogin();
+    });
+
+    // Initial check
+    console.log('%cSystem loaded successfully - API Mode', 'color:#c9a84c;font-weight:bold');
+</script>
+
+</body>
+</html>
