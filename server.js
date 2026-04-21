@@ -1,171 +1,147 @@
-import express from "express";
-import mongoose from "mongoose";
-import multer from "multer";
-import dotenv from "dotenv";
-import path from "path";
-import { fileURLToPath } from "url";
-import crypto from "crypto";
-
-dotenv.config();
+require('dotenv').config();
+const express = require('express');
+const mongoose = require('mongoose');
+const jwt = require('jsonwebtoken');
+const path = require('path');
 
 const app = express();
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = path.dirname(__filename);
+app.use(express.json({ limit: '100mb' }));
+app.use(express.urlencoded({ extended: true, limit: '100mb' }));
+app.use(express.static(path.join(__dirname, 'public')));
 
-// ─── Middleware ───────────────────────────────────────────────────────────────
-app.use(express.json({ limit: "10mb" }));
-app.use(express.urlencoded({ extended: true }));
+// ─── MongoDB ────────────────────────────────────────────
+mongoose.connect(process.env.MONGODB_URI || 'mongodb://localhost:27017/orphan_db')
+  .then(() => console.log('✅ MongoDB connected'))
+  .catch(err => console.error('❌ MongoDB error:', err));
 
-// CORS – required for Render deployment
-app.use((req, res, next) => {
-  res.setHeader("Access-Control-Allow-Origin", "*");
-  res.setHeader("Access-Control-Allow-Methods", "GET,POST,PUT,DELETE,OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type,Authorization");
-  if (req.method === "OPTIONS") return res.sendStatus(204);
-  next();
+// ─── Schemas ────────────────────────────────────────────
+const DataStoreSchema = new mongoose.Schema({
+  key:       { type: String, required: true, unique: true },
+  value:     { type: mongoose.Schema.Types.Mixed },
+  updatedAt: { type: Date, default: Date.now }
 });
+const DataStore = mongoose.model('DataStore', DataStoreSchema);
 
-// ─── Multer – memory storage (Render has no persistent disk) ─────────────────
-const upload = multer({
-  storage: multer.memoryStorage(),
-  limits: { fileSize: 5 * 1024 * 1024 },
-  fileFilter: (req, file, cb) => {
-    if (file.mimetype.startsWith("image/")) cb(null, true);
-    else cb(new Error("Only image files allowed"), false);
-  },
-});
-
-// ─── Mongoose Models ──────────────────────────────────────────────────────────
-const studentSchema = new mongoose.Schema({
-  name:      { type: String, required: true },
-  age:       String,
-  phone:     String,
-  gender:    String,
-  school:    String,
-  photo:     { data: Buffer, contentType: String },
-  createdAt: { type: Date, default: Date.now },
-});
-
-const Student = mongoose.model("Student", studentSchema);
-
-// ─── Token helpers (no extra deps – pure Node crypto) ────────────────────────
-function signToken(payload) {
-  const header = Buffer.from(JSON.stringify({ alg: "HS256" })).toString("base64url");
-  const body   = Buffer.from(JSON.stringify(payload)).toString("base64url");
-  const sig    = crypto
-    .createHmac("sha256", process.env.JWT_SECRET || "changeme_in_env")
-    .update(`${header}.${body}`)
-    .digest("base64url");
-  return `${header}.${body}.${sig}`;
-}
-
-function verifyToken(token) {
+// ─── Auth Middleware ─────────────────────────────────────
+function auth(req, res, next) {
+  const header = req.headers['authorization'];
+  const token  = header && header.split(' ')[1];
+  if (!token) return res.status(401).json({ error: 'توکن موجود نیست' });
   try {
-    const [header, body, sig] = token.split(".");
-    const expected = crypto
-      .createHmac("sha256", process.env.JWT_SECRET || "changeme_in_env")
-      .update(`${header}.${body}`)
-      .digest("base64url");
-    if (sig !== expected) return null;
-    const payload = JSON.parse(Buffer.from(body, "base64url").toString());
-    if (payload.exp && Date.now() > payload.exp) return null;
-    return payload;
-  } catch { return null; }
-}
-
-// ─── Auth Middleware ──────────────────────────────────────────────────────────
-function requireAuth(req, res, next) {
-  const auth  = req.headers["authorization"] || "";
-  const token = auth.startsWith("Bearer ") ? auth.slice(7) : null;
-  if (!token || !verifyToken(token)) return res.status(401).json({ error: "Unauthorized" });
-  next();
-}
-
-// ─── LOGIN ── THIS was the missing piece causing the hang ─────────────────────
-app.post("/api/login", (req, res) => {
-  const { username, password } = req.body;
-  const adminUser = process.env.ADMIN_USERNAME || "admin";
-  const adminPass = process.env.ADMIN_PASSWORD || "admin123";
-
-  if (username === adminUser && password === adminPass) {
-    const token = signToken({ sub: username, exp: Date.now() + 24 * 60 * 60 * 1000 });
-    return res.json({ success: true, token });
+    req.user = jwt.verify(token, process.env.JWT_SECRET || 'oms_secret_key_2024');
+    next();
+  } catch {
+    res.status(401).json({ error: 'توکن نامعتبر است' });
   }
-  return res.status(401).json({ success: false, error: "Invalid credentials" });
-});
-
-// Session check – frontend calls this on page load
-app.get("/api/auth/check", requireAuth, (req, res) => {
-  res.json({ authenticated: true });
-});
-
-// ─── Students ─────────────────────────────────────────────────────────────────
-app.get("/api/students", requireAuth, async (req, res) => {
-  try {
-    const data = await Student.find().select("-photo.data").sort({ createdAt: -1 });
-    res.json(data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.post("/api/students", requireAuth, upload.single("photo"), async (req, res) => {
-  try {
-    const studentData = { ...req.body };
-    if (req.file) studentData.photo = { data: req.file.buffer, contentType: req.file.mimetype };
-    const s = new Student(studentData);
-    await s.save();
-    const obj = s.toObject();
-    delete obj.photo; // don't send binary back
-    res.json({ ...obj, hasPhoto: !!req.file });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.put("/api/students/:id", requireAuth, upload.single("photo"), async (req, res) => {
-  try {
-    const update = { ...req.body };
-    if (req.file) update.photo = { data: req.file.buffer, contentType: req.file.mimetype };
-    const s = await Student.findByIdAndUpdate(req.params.id, update, { new: true }).select("-photo.data");
-    if (!s) return res.status(404).json({ error: "Not found" });
-    res.json(s);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-app.delete("/api/students/:id", requireAuth, async (req, res) => {
-  try {
-    await Student.findByIdAndDelete(req.params.id);
-    res.json({ success: true });
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// Serve photo from MongoDB (replaces the old /uploads/ static folder)
-app.get("/api/students/:id/photo", async (req, res) => {
-  try {
-    const s = await Student.findById(req.params.id).select("photo");
-    if (!s?.photo?.data) return res.status(404).send("No photo");
-    res.set("Content-Type", s.photo.contentType);
-    res.send(s.photo.data);
-  } catch (err) { res.status(500).json({ error: err.message }); }
-});
-
-// ─── Health check (Render pings this) ────────────────────────────────────────
-app.get("/health", (req, res) => res.json({ status: "ok" }));
-
-// ─── Serve frontend ───────────────────────────────────────────────────────────
-app.use(express.static(path.join(__dirname, "public")));
-app.get("*", (req, res) => res.sendFile(path.join(__dirname, "public/index.html")));
-
-// ─── Connect to MongoDB then start ───────────────────────────────────────────
-if (!process.env.MONGO_URI) {
-  console.error("❌  MONGO_URI is not set in environment variables.");
-  process.exit(1);
 }
 
-mongoose
-  .connect(process.env.MONGO_URI)
-  .then(() => {
-    const PORT = process.env.PORT || 10000;
-    app.listen(PORT, () => console.log(`✅  Server running on port ${PORT}`));
-  })
-  .catch((err) => {
-    console.error("❌  MongoDB connection failed:", err.message);
-    process.exit(1);
-  });
+// ─── Default Users ────────────────────────────────────────
+const DEFAULT_USERS = [
+  { id: 'u1', username: 'admin',  password: 'admin123', fullName: 'System Administrator', role: 'admin'  },
+  { id: 'u2', username: 'editor', password: 'edit123',  fullName: 'Data Editor',           role: 'editor' },
+  { id: 'u3', username: 'viewer', password: 'view123',  fullName: 'Read-Only Viewer',       role: 'viewer' },
+];
+
+// ─── Seed ─────────────────────────────────────────────────
+async function seedDefaults() {
+  const exists = await DataStore.findOne({ key: 'oms_users' });
+  if (!exists) {
+    await DataStore.create({ key: 'oms_users', value: DEFAULT_USERS });
+    console.log('✅ Default users seeded');
+  }
+}
+
+// ─── Routes ───────────────────────────────────────────────
+
+// Login
+app.post('/api/login', async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password)
+      return res.status(400).json({ error: 'نام کاربری و رمز عبور الزامی است' });
+
+    const doc   = await DataStore.findOne({ key: 'oms_users' });
+    const users = doc?.value || DEFAULT_USERS;
+    const user  = users.find(u => u.username === username && u.password === password);
+
+    if (!user) return res.status(401).json({ error: 'نام کاربری یا رمز عبور اشتباه است' });
+
+    const token = jwt.sign(
+      { id: user.id, username: user.username, role: user.role },
+      process.env.JWT_SECRET || 'oms_secret_key_2024',
+      { expiresIn: '7d' }
+    );
+
+    res.json({
+      token,
+      user: { id: user.id, username: user.username, fullName: user.fullName, role: user.role }
+    });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطای سرور' });
+  }
+});
+
+// GET all data for current user
+app.get('/api/sync', auth, async (req, res) => {
+  try {
+    const docs   = await DataStore.find({});
+    const result = {};
+    docs.forEach(d => { result[d.key] = d.value; });
+    res.json(result);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطا در بارگذاری داده‌ها' });
+  }
+});
+
+// POST save one key
+app.post('/api/sync', auth, async (req, res) => {
+  try {
+    const { key, data } = req.body;
+    if (!key) return res.status(400).json({ error: 'کلید الزامی است' });
+
+    await DataStore.findOneAndUpdate(
+      { key },
+      { value: data, updatedAt: new Date() },
+      { upsert: true, new: true }
+    );
+    res.json({ ok: true });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطا در ذخیره داده' });
+  }
+});
+
+// Bulk save (export/import)
+app.post('/api/sync/bulk', auth, async (req, res) => {
+  try {
+    const { entries } = req.body; // [{key, data}]
+    if (!Array.isArray(entries)) return res.status(400).json({ error: 'فرمت نادرست' });
+    const ops = entries.map(({ key, data }) => ({
+      updateOne: {
+        filter: { key },
+        update: { $set: { value: data, updatedAt: new Date() } },
+        upsert: true
+      }
+    }));
+    await DataStore.bulkWrite(ops);
+    res.json({ ok: true, count: entries.length });
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: 'خطا در ذخیره دسته‌ای' });
+  }
+});
+
+// Health check
+app.get('/api/health', (_, res) => res.json({ status: 'ok', time: new Date() }));
+
+// SPA fallback
+app.get('*', (_, res) => res.sendFile(path.join(__dirname, 'public', 'index.html')));
+
+// ─── Start ────────────────────────────────────────────────
+const PORT = process.env.PORT || 3000;
+mongoose.connection.once('open', async () => {
+  await seedDefaults();
+  app.listen(PORT, () => console.log(`🚀 Server running on port ${PORT}`));
+});

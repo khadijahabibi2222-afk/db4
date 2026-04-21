@@ -1,59 +1,136 @@
-# Orphan Management System
+# 🕌 سیستم مدیریت یتیمان — موسسه خیریه رفاه یتیم
 
-A Node.js + MongoDB web app for managing orphan student records.
+یک وب اپلیکیشن کامل برای مدیریت یتیمان، کفلا، ثبت نمرات، کتابخانه و گزارش‌گیری.
 
 ---
 
-## 🚀 Deploy to Render + MongoDB Atlas
+## 🗂️ ساختار پروژه
 
-### 1. MongoDB Atlas Setup
-1. Go to [mongodb.com/cloud/atlas](https://mongodb.com/cloud/atlas) → create free cluster
-2. Add a database user (username + password)
-3. Whitelist `0.0.0.0/0` under Network Access (allows Render to connect)
-4. Copy your connection string:  
-   `mongodb+srv://<user>:<password>@cluster.mongodb.net/orphan-db`
+```
+orphan-app/
+├── server.js          ← Express + MongoDB backend
+├── package.json
+├── .env.example       ← نمونه متغیرهای محیطی
+├── .gitignore
+└── public/
+    └── index.html     ← کل فرانت‌اند (Single Page App)
+```
 
-### 2. GitHub
+---
+
+## 🚀 مراحل راه‌اندازی آنلاین
+
+### مرحله ۱ — MongoDB Atlas (دیتابیس رایگان)
+
+1. به [mongodb.com/atlas](https://www.mongodb.com/atlas) بروید
+2. **Create a free account** → **Create Free Cluster** (M0 رایگان است)
+3. در **Database Access**: یک کاربر با رمز عبور بسازید
+4. در **Network Access**: `0.0.0.0/0` را اضافه کنید (اجازه دسترسی از همه‌جا)
+5. روی **Connect** کلیک کنید → **Drivers** → Connection String را کپی کنید:
+   ```
+   mongodb+srv://USERNAME:PASSWORD@cluster0.xxxxx.mongodb.net/orphan_db?retryWrites=true&w=majority
+   ```
+
+---
+
+### مرحله ۲ — GitHub (آپلود کد)
+
 ```bash
+# در پوشه orphan-app:
 git init
 git add .
-git commit -m "initial commit"
-git remote add origin https://github.com/YOUR_USERNAME/orphan-management.git
+git commit -m "Initial commit — Orphan Management System"
+
+# یک repository جدید در github.com بسازید، سپس:
+git remote add origin https://github.com/YOUR_USERNAME/orphan-app.git
+git branch -M main
 git push -u origin main
 ```
 
-### 3. Render
-1. Go to [render.com](https://render.com) → New → Web Service
-2. Connect your GitHub repo
-3. Set these **Environment Variables** in Render dashboard:
+---
 
-| Key              | Value                              |
-|------------------|------------------------------------|
-| `MONGO_URI`      | your MongoDB Atlas connection string |
-| `ADMIN_USERNAME` | e.g. `admin`                       |
-| `ADMIN_PASSWORD` | a strong password                  |
-| `JWT_SECRET`     | any random long string             |
+### مرحله ۳ — Render (هاستینگ رایگان)
 
-4. Build command: `npm install`  
-5. Start command: `node server.js`
+1. به [render.com](https://render.com) بروید و با GitHub وارد شوید
+2. **New → Web Service**
+3. Repository خود را انتخاب کنید
+4. تنظیمات:
+   | فیلد | مقدار |
+   |------|-------|
+   | **Name** | orphan-management-system |
+   | **Runtime** | Node |
+   | **Build Command** | `npm install` |
+   | **Start Command** | `node server.js` |
+5. در بخش **Environment Variables** این دو را اضافه کنید:
+   ```
+   MONGODB_URI  =  mongodb+srv://...  (از مرحله ۱)
+   JWT_SECRET   =  OrphanApp_Secret_2024_!@#
+   ```
+6. **Create Web Service** → صبر کنید تا Deploy شود (~2 دقیقه)
+7. آدرس شما: `https://orphan-management-system.onrender.com`
 
 ---
 
-## 🔑 Login
-Use the `ADMIN_USERNAME` and `ADMIN_PASSWORD` you set in environment variables.
+## 🔑 اطلاعات ورود پیش‌فرض
 
-## 📁 File Storage
-Photos are stored directly in MongoDB (no disk needed) — works on Render's free tier.
+| نقش | نام کاربری | رمز عبور |
+|-----|-----------|---------|
+| مدیر کل | `admin` | `admin123` |
+| ویرایشگر | `editor` | `edit123` |
+| مشاهده‌گر | `viewer` | `view123` |
 
-## API Endpoints
+⚠️ **پس از اولین ورود، رمزها را تغییر دهید!**
 
-| Method | Path                        | Auth | Description          |
-|--------|-----------------------------|------|----------------------|
-| POST   | /api/login                  | ❌   | Login → returns token |
-| GET    | /api/auth/check             | ✅   | Verify token          |
-| GET    | /api/students               | ✅   | List all students     |
-| POST   | /api/students               | ✅   | Add student + photo   |
-| PUT    | /api/students/:id           | ✅   | Update student        |
-| DELETE | /api/students/:id           | ✅   | Delete student        |
-| GET    | /api/students/:id/photo     | ❌   | Get student photo     |
-| GET    | /health                     | ❌   | Health check          |
+---
+
+## 🔄 نحوه عملکرد سینک داده
+
+```
+[مرورگر] ──login──► [Render / Express] ──auth──► [MongoDB Atlas]
+                          │
+                     JWT Token صادر می‌شود
+                          │
+[مرورگر] ──save data──► [API /api/sync] ──► [MongoDB]
+[مرورگر] ◄──load data── [API /api/sync] ◄── [MongoDB]
+```
+
+- هنگام **لاگین**: داده‌ها از MongoDB بارگذاری می‌شوند
+- هنگام **ذخیره**: هم localStorage هم MongoDB آپدیت می‌شوند
+- اگر اینترنت قطع باشد: **Offline mode** — فقط localStorage کار می‌کند
+
+---
+
+## 🛠️ اجرای محلی (برای تست)
+
+```bash
+# نصب
+npm install
+
+# ساخت فایل .env
+cp .env.example .env
+# فایل .env را ویرایش کنید و MONGODB_URI را وارد کنید
+
+# اجرا
+npm start
+# برنامه روی http://localhost:3000 قابل دسترس است
+```
+
+---
+
+## 📋 API Endpoints
+
+| Method | Path | توضیح |
+|--------|------|-------|
+| POST | `/api/login` | ورود و دریافت JWT token |
+| GET | `/api/sync` | دریافت همه داده‌ها |
+| POST | `/api/sync` | ذخیره یک کلید |
+| POST | `/api/sync/bulk` | ذخیره دسته‌ای |
+| GET | `/api/health` | وضعیت سرور |
+
+---
+
+## ⚙️ نکات مهم
+
+- فایل `public/index.html` کل فرانت‌اند است — هر تغییر در UI فقط در همین فایل است
+- عکس‌ها در IndexedDB مرورگر ذخیره می‌شوند (base64) و در MongoDB sync نمی‌شوند — برای عکس‌ها می‌توان Cloudinary اضافه کرد
+- Render در پلان رایگان بعد از ۱۵ دقیقه خواب می‌رود — اولین request کمی کند است
